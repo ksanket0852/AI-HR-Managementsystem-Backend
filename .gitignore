@@ -43,7 +43,3 @@ tmp/
 temp/
 
 
-middlewares/
-models/
-utils/
-controllers/
