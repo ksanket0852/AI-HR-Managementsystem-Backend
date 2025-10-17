@@ -1,0 +1,541 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User Authentication & Authorization
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  role      UserRole @default(EMPLOYEE)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  employee     Employee?
+  approvedLeaves Leave[] @relation("LeaveApprovedBy")
+  notifications Notification[]
+  chatMessages ChatMessage[]
+  performanceReviews PerformanceReview[] @relation("RevieweeUser")
+  reviewsGiven PerformanceReview[] @relation("ReviewerUser")
+
+  @@map("users")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  HR_ADMIN
+  HR_MANAGER
+  MANAGER
+  EMPLOYEE
+}
+
+// Company Structure
+model Department {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  headId      String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  employees Employee[]
+  head      Employee? @relation("DepartmentHead", fields: [headId], references: [id])
+  jobs      Job[]
+
+  @@map("departments")
+}
+
+// Employee Information
+model Employee {
+  id              String    @id @default(cuid())
+  employeeId      String    @unique
+  userId          String    @unique
+  firstName       String
+  lastName        String
+  email           String    @unique
+  phone           String?
+  dateOfBirth     DateTime?
+  dateOfJoining   DateTime
+  departmentId    String
+  designation     String
+  managerId       String?
+  salary          Decimal?
+  isActive        Boolean   @default(true)
+  profilePicture  String?
+  address         Json?     // Store address as JSON
+  emergencyContact Json?    // Store emergency contact as JSON
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department   Department   @relation(fields: [departmentId], references: [id])
+  manager      Employee?    @relation("EmployeeManager", fields: [managerId], references: [id])
+  subordinates Employee[]   @relation("EmployeeManager")
+  departmentHead Department[] @relation("DepartmentHead")
+  
+  // HR Relations
+  attendances  Attendance[]
+  leaves       Leave[]
+  payrolls     Payroll[]
+  performanceReviews PerformanceReview[] @relation("RevieweeEmployee")
+  reviewsGiven PerformanceReview[] @relation("ReviewerEmployee")
+  goals        Goal[]
+  postedJobs   Job[]
+  reviewedApplications JobApplication[]
+  interviews Interview[]
+
+  @@map("employees")
+}
+
+// Attendance Management
+model Attendance {
+  id         String           @id @default(cuid())
+  employeeId String
+  date       DateTime         @db.Date
+  clockIn    DateTime?
+  clockOut   DateTime?
+  breakTime  Int?             // in minutes
+  totalHours Decimal?
+  overtime   Decimal?
+  status     AttendanceStatus @default(PRESENT)
+  notes      String?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  // Relations
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, date])
+  @@map("attendances")
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  HALF_DAY
+  WORK_FROM_HOME
+}
+
+// Leave Management
+model LeaveType {
+  id           String  @id @default(cuid())
+  name         String  @unique
+  description  String?
+  maxDays      Int
+  carryForward Boolean @default(false)
+  isActive     Boolean @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  leaves Leave[]
+
+  @@map("leave_types")
+}
+
+model Leave {
+  id             String      @id @default(cuid())
+  employeeId     String
+  leaveTypeId    String
+  startDate      DateTime    @db.Date
+  endDate        DateTime    @db.Date
+  days           Decimal
+  reason         String
+  status         LeaveStatus @default(PENDING)
+  appliedAt      DateTime    @default(now())
+  approvedBy     String?
+  approvedAt     DateTime?
+  rejectedReason String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  // Relations
+  employee    Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType   LeaveType  @relation(fields: [leaveTypeId], references: [id])
+  approver    User?      @relation("LeaveApprovedBy", fields: [approvedBy], references: [id])
+
+  @@map("leaves")
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+// Payroll Management
+model Payroll {
+  id           String        @id @default(cuid())
+  employeeId   String
+  month        Int           // 1-12
+  year         Int
+  basicSalary  Decimal
+  allowances   Json?         // Store allowances as JSON
+  deductions   Json?         // Store deductions as JSON
+  grossSalary  Decimal
+  netSalary    Decimal
+  taxAmount    Decimal       @default(0)
+  status       PayrollStatus @default(DRAFT)
+  generatedAt  DateTime      @default(now())
+  paidAt       DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  // Relations
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, month, year])
+  @@map("payrolls")
+}
+
+enum PayrollStatus {
+  DRAFT
+  APPROVED
+  PAID
+}
+
+// Performance Management
+model PerformanceReview {
+  id           String       @id @default(cuid())
+  revieweeId   String       // Employee being reviewed
+  reviewerId   String       // Person conducting review
+  revieweeUserId String     // User ID of reviewee
+  reviewerUserId String     // User ID of reviewer
+  period       String       // e.g., "Q1 2024", "Annual 2024"
+  overallRating Decimal     @db.Decimal(3,2) // 0.00 to 5.00
+  feedback     String?
+  goals        Json?        // Store goals as JSON
+  achievements Json?        // Store achievements as JSON
+  status       ReviewStatus @default(DRAFT)
+  submittedAt  DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  // Relations
+  reviewee     Employee @relation("RevieweeEmployee", fields: [revieweeId], references: [id], onDelete: Cascade)
+  reviewer     Employee @relation("ReviewerEmployee", fields: [reviewerId], references: [id])
+  revieweeUser User     @relation("RevieweeUser", fields: [revieweeUserId], references: [id])
+  reviewerUser User     @relation("ReviewerUser", fields: [reviewerUserId], references: [id])
+
+  @@map("performance_reviews")
+}
+
+enum ReviewStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+model Goal {
+  id          String     @id @default(cuid())
+  employeeId  String
+  title       String
+  description String?
+  targetDate  DateTime   @db.Date
+  status      GoalStatus @default(NOT_STARTED)
+  progress    Int        @default(0) // 0-100
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  // Relations
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@map("goals")
+}
+
+enum GoalStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// Notifications
+model Notification {
+  id        String             @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  type      NotificationType
+  priority  String             @default("MEDIUM")
+  isRead    Boolean            @default(false)
+  readAt    DateTime?
+  metadata  Json?              // Additional data as JSON
+  createdAt DateTime           @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+enum NotificationType {
+  LEAVE_REQUEST
+  LEAVE_APPROVED
+  LEAVE_REJECTED
+  ATTENDANCE_REMINDER
+  PAYROLL_GENERATED
+  PERFORMANCE_REVIEW
+  SYSTEM_ANNOUNCEMENT
+}
+
+// AI Features
+model ChatMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  message   String
+  response  String
+  context   Json?    // Store conversation context
+  createdAt DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("chat_messages")
+}
+
+// System Configuration
+model SystemConfig {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_config")
+}
+
+// Resume Parser & Recruitment
+model Candidate {
+  id              String           @id @default(cuid())
+  firstName       String
+  lastName        String
+  email           String           @unique
+  phone           String?
+  dateOfBirth     DateTime?
+  address         Json?            // Store address as JSON
+  profileSummary  String?
+  totalExperience Decimal?         // in years
+  expectedSalary  Decimal?
+  currentSalary   Decimal?
+  noticePeriod    String?
+  status          CandidateStatus  @default(NEW)
+  source          String?          // LinkedIn, Indeed, Referral, etc.
+  referredBy      String?
+  linkedinUrl     String?
+  portfolioUrl    String?
+  githubUrl       String?
+  skills          Json?            // Array of skills with proficiency levels
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  // Relations
+  resumes         Resume[]
+  interviews      Interview[]
+  applications    JobApplication[]
+
+  @@map("candidates")
+}
+
+enum CandidateStatus {
+  NEW
+  REVIEWED
+  SHORTLISTED
+  INTERVIEW_SCHEDULED
+  INTERVIEWED
+  SELECTED
+  REJECTED
+  HIRED
+  WITHDRAWN
+}
+
+model Resume {
+  id               String       @id @default(cuid())
+  candidateId      String
+  originalFileName String
+  filePath         String
+  fileType         String       // PDF, DOC, DOCX
+  fileSize         Int          // in bytes
+  rawText          String       // Extracted text from resume
+  parsedData       Json         // Structured data from AI parsing
+  skills           Json?        // Array of extracted skills
+  experience       Json?        // Array of work experiences
+  education        Json?        // Array of education details
+  certifications   Json?        // Array of certifications
+  languages        Json?        // Array of languages
+  projects         Json?        // Array of projects
+  aiScore          Decimal?     // AI-generated relevance score
+  keywordMatches   Json?        // Matched keywords for jobs
+  isLatest         Boolean      @default(true)
+  uploadedAt       DateTime     @default(now())
+  parsedAt         DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  // Relations
+  candidate        Candidate    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  jobMatches       JobMatch[]
+
+  @@map("resumes")
+}
+
+model Job {
+  id              String         @id @default(cuid())
+  title           String
+  departmentId    String
+  description     String
+  requirements    Json           // Array of requirements
+  skills          Json           // Array of required skills
+  experienceMin   Int            @default(0)
+  experienceMax   Int?
+  salaryMin       Decimal?
+  salaryMax       Decimal?
+  location        String
+  type            JobType        @default(FULL_TIME)
+  status          JobStatus      @default(OPEN)
+  postedBy        String         // Employee ID who posted
+  postedAt        DateTime       @default(now())
+  closingDate     DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  // Relations
+  department      Department     @relation(fields: [departmentId], references: [id])
+  poster          Employee       @relation(fields: [postedBy], references: [id])
+  applications    JobApplication[]
+  jobMatches      JobMatch[]
+  interviews      Interview[]
+
+  @@map("jobs")
+}
+
+enum JobType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  TEMPORARY
+  INTERNSHIP
+}
+
+enum JobStatus {
+  DRAFT
+  OPEN
+  CLOSED
+  ON_HOLD
+}
+
+model JobApplication {
+  id             String            @id @default(cuid())
+  candidateId    String
+  jobId          String
+  resumeId       String?
+  coverLetter    String?
+  status         ApplicationStatus @default(SUBMITTED)
+  appliedAt      DateTime          @default(now())
+  reviewedAt     DateTime?
+  reviewedBy     String?           // Employee ID
+  notes          String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  // Relations
+  candidate      Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  job            Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  reviewer       Employee?         @relation(fields: [reviewedBy], references: [id])
+
+  @@unique([candidateId, jobId])
+  @@map("job_applications")
+}
+
+enum ApplicationStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  SHORTLISTED
+  INTERVIEW_SCHEDULED
+  INTERVIEWED
+  SELECTED
+  REJECTED
+  WITHDRAWN
+}
+
+model JobMatch {
+  id           String    @id @default(cuid())
+  resumeId     String
+  jobId        String
+  matchScore   Decimal   @db.Decimal(5,2) // 0.00 to 100.00
+  skillMatches Json      // Array of matched skills
+  keywordMatches Json    // Array of matched keywords
+  experienceMatch Boolean @default(false)
+  salaryMatch    Boolean @default(false)
+  locationMatch  Boolean @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Relations
+  resume       Resume    @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  job          Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([resumeId, jobId])
+  @@map("job_matches")
+}
+
+model Interview {
+  id            String          @id @default(cuid())
+  candidateId   String
+  jobId         String
+  interviewerId String
+  type          InterviewType   @default(PHONE)
+  scheduledAt   DateTime
+  duration      Int             @default(60) // in minutes
+  location      String?
+  meetingLink   String?
+  status        InterviewStatus @default(SCHEDULED)
+  feedback      String?
+  rating        Decimal?        @db.Decimal(3,2) // 0.00 to 5.00
+  notes         String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  // Relations
+  candidate     Candidate       @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  job           Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  interviewer   Employee        @relation(fields: [interviewerId], references: [id])
+
+  @@map("interviews")
+}
+
+enum InterviewType {
+  PHONE
+  VIDEO
+  IN_PERSON
+  TECHNICAL
+  HR
+  FINAL
+}
+
+enum InterviewStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  RESCHEDULED
+  NO_SHOW
+}
