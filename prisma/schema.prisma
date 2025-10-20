@@ -99,6 +99,7 @@ model Employee {
   postedJobs   Job[]
   reviewedApplications JobApplication[]
   interviews Interview[]
+  recruitmentSessions RecruitmentSession[]
 
   @@map("employees")
 }
@@ -352,6 +353,9 @@ model Candidate {
   resumes         Resume[]
   interviews      Interview[]
   applications    JobApplication[]
+  analyses        CandidateAnalysis[]
+  insights        ConversationInsight[]
+  recruitmentSessions RecruitmentSession[]
 
   @@map("candidates")
 }
@@ -424,6 +428,7 @@ model Job {
   applications    JobApplication[]
   jobMatches      JobMatch[]
   interviews      Interview[]
+  recruitmentSessions RecruitmentSession[]
 
   @@map("jobs")
 }
@@ -519,6 +524,7 @@ model Interview {
   candidate     Candidate       @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   job           Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
   interviewer   Employee        @relation(fields: [interviewerId], references: [id])
+  analyses      CandidateAnalysis[]
 
   @@map("interviews")
 }
@@ -538,4 +544,100 @@ enum InterviewStatus {
   CANCELLED
   RESCHEDULED
   NO_SHOW
+}
+
+// AI Recruitment Analysis Models
+model CandidateAnalysis {
+  id                String   @id @default(cuid())
+  candidateId       String
+  interviewId       String?
+  recruitmentSessionId String?  // Recruitment session ID
+  analysisType      AnalysisType @default(REAL_TIME)
+  skillsDetected    Json     // Array of detected skills
+  fitScore          Decimal  @db.Decimal(5,2) // 0.00 to 100.00
+  communicationTone String  // confident, nervous, professional, etc.
+  recommendedAction String  // invite_technical, invite_hr, etc.
+  strengths         Json     // Array of strengths
+  concerns          Json     // Array of concerns
+  experienceMatch   Decimal  @db.Decimal(5,2) // 0.00 to 100.00
+  culturalFit       Decimal  @db.Decimal(5,2) // 0.00 to 100.00
+  technicalSkills   Json     // Array of technical skills
+  softSkills        Json     // Array of soft skills
+  confidenceLevel   Decimal  @db.Decimal(5,2) // 0.00 to 100.00
+  responseQuality   Decimal  @db.Decimal(5,2) // 0.00 to 100.00
+  conversationPhase String?  // greeting, experience, skills, etc.
+  rawAnalysis       Json?    // Store full AI analysis response
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  interview Interview? @relation(fields: [interviewId], references: [id])
+  recruitmentSession RecruitmentSession? @relation(fields: [recruitmentSessionId], references: [id])
+
+  @@map("candidate_analyses")
+}
+
+enum AnalysisType {
+  REAL_TIME
+  POST_INTERVIEW
+  BATCH_ANALYSIS
+}
+
+model ConversationInsight {
+  id                String   @id @default(cuid())
+  sessionId         String
+  candidateId       String
+  insightType       InsightType
+  title             String
+  description       String
+  confidence        Decimal  @db.Decimal(5,2) // 0.00 to 100.00
+  metadata          Json?    // Additional insight data
+  isActionable      Boolean  @default(false)
+  actionTaken       String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@map("conversation_insights")
+}
+
+enum InsightType {
+  SKILL_ASSESSMENT
+  COMMUNICATION_PATTERN
+  CULTURAL_FIT
+  TECHNICAL_EXPERTISE
+  BEHAVIORAL_INDICATOR
+  RED_FLAG
+  STRENGTH_IDENTIFIED
+  IMPROVEMENT_AREA
+}
+
+model RecruitmentSession {
+  id                String   @id @default(cuid())
+  candidateId       String
+  jobId             String
+  interviewerId     String
+  sessionType       String   // pre-screening, technical, hr, final
+  status            String   // scheduled, in-progress, completed, cancelled
+  startTime         DateTime
+  endTime           DateTime?
+  duration          Int?     // in minutes
+  overallRating     Decimal? @db.Decimal(5,2) // 0.00 to 100.00
+  summary           String?
+  notes             String?
+  conversationData  Json?    // Store conversation history
+  aiInsights        Json?    // Store AI-generated insights
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  candidate         Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  job               Job @relation(fields: [jobId], references: [id])
+  interviewer       Employee @relation(fields: [interviewerId], references: [id])
+  analyses          CandidateAnalysis[]
+
+  @@map("recruitment_sessions")
 }

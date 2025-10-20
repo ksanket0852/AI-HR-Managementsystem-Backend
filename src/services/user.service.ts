@@ -8,6 +8,10 @@ class UserService {
     return this.prisma.user.findUnique({ where: { email } });
   }
 
+  public async findUserById(id: string): Promise<User | null> {
+    return this.prisma.user.findUnique({ where: { id } });
+  }
+
   public async createUser(data: any): Promise<User> {
     const hashedPassword = await this.hashPassword(data.password);
     

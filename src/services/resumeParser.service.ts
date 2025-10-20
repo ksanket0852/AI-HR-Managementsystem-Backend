@@ -247,7 +247,7 @@ class ResumeParserService {
 
     try {
       const response = await openai.chat.completions.create({
-        model: 'gpt-4',
+        model: 'gpt-4o-mini',
         messages: [
           {
             role: 'user',
@@ -263,9 +263,75 @@ class ResumeParserService {
         throw new Error('No response from OpenAI');
       }
 
-      // Parse JSON response
-      const parsedData = JSON.parse(content);
-      return parsedData as ParsedResumeData;
+      // Helper: remove markdown fences and extract a balanced JSON object
+      const removeFences = (s: string) => s.replace(/```[\s\S]*?```/g, (m) => {
+        // remove the fences but keep inner content
+        const inner = m.replace(/^```[a-zA-Z]*\n?/i, '').replace(/\n?```$/i, '');
+        return inner;
+      });
+
+      const extractBalancedJson = (s: string): string | null => {
+        if (!s) return null;
+        // Remove code fences first
+        let candidate = removeFences(s).trim();
+
+        // Find first '{'
+        const start = candidate.indexOf('{');
+        if (start === -1) return null;
+
+        // Scan for matching closing '}' taking nested braces into account and ignoring braces in strings
+        let depth = 0;
+        let inString = false;
+        let escape = false;
+        for (let i = start; i < candidate.length; i++) {
+          const ch = candidate[i];
+          if (escape) {
+            escape = false;
+            continue;
+          }
+          if (ch === '\\') {
+            escape = true;
+            continue;
+          }
+          if (ch === '"') {
+            inString = !inString;
+            continue;
+          }
+          if (inString) continue;
+          if (ch === '{') depth++;
+          if (ch === '}') {
+            depth--;
+            if (depth === 0) {
+              return candidate.slice(start, i + 1);
+            }
+          }
+        }
+        return null;
+      };
+
+      const jsonString = extractBalancedJson(content);
+      if (!jsonString) {
+        console.error('[resume-parser] No JSON-like content found in OpenAI response:', content);
+        throw new Error('OpenAI returned no JSON content');
+      }
+
+      try {
+        const parsedData = JSON.parse(jsonString);
+        return parsedData as ParsedResumeData;
+      } catch (parseError) {
+        console.error('[resume-parser] Failed to parse JSON from OpenAI response. Raw response:', content);
+        console.error('[resume-parser] Extracted JSON string:', jsonString);
+        // Try a simple sanitize: remove trailing commas before } or ]
+        try {
+          const sanitized = jsonString.replace(/,\s*([}\]])/g, '$1');
+          const parsedSanitized = JSON.parse(sanitized);
+          console.warn('[resume-parser] Parsed JSON after simple sanitization');
+          return parsedSanitized as ParsedResumeData;
+        } catch (sanErr) {
+          console.error('[resume-parser] Sanitized parse failed:', sanErr);
+          throw new Error(`Failed to parse resume with AI: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+        }
+      }
     } catch (error) {
       console.error('OpenAI parsing error:', error);
       throw new Error(`Failed to parse resume with AI: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -422,7 +488,7 @@ class ResumeParserService {
 
     try {
       const response = await openai.chat.completions.create({
-        model: 'gpt-4',
+        model: 'gpt-3.5-turbo',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.1,
         max_tokens: 2000,
@@ -550,6 +616,16 @@ class ResumeParserService {
     return await prisma.candidate.update({
       where: { id: candidateId },
       data: { status: status as any },
+    });
+  }
+
+  /**
+   * Update candidate general information
+   */
+  async updateCandidate(candidateId: string, updateData: any) {
+    return await prisma.candidate.update({
+      where: { id: candidateId },
+      data: updateData,
     });
   }
 

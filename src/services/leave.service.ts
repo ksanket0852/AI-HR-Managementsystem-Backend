@@ -39,7 +39,23 @@ class LeaveService {
     const where: any = {};
 
     if (query.isActive !== undefined) {
-      where.isActive = query.isActive;
+      // Query params are strings from Express. Coerce to boolean safely.
+      let isActive: boolean | undefined;
+      const raw: any = query.isActive;
+
+      if (typeof raw === 'string') {
+        const v = raw.toLowerCase();
+        if (v === 'true' || v === '1') isActive = true;
+        else if (v === 'false' || v === '0') isActive = false;
+      } else if (typeof raw === 'boolean') {
+        isActive = raw;
+      }
+
+      if (typeof isActive === 'boolean') {
+        where.isActive = isActive;
+      } else {
+        throw new Error('Invalid isActive query parameter, expected boolean');
+      }
     }
 
     return this.prisma.leaveType.findMany({
@@ -238,28 +254,39 @@ class LeaveService {
   public async getLeaveApplications(query: LeaveApplicationQuery = {}) {
     const where: any = {};
 
+    // Validate and normalize employeeId
     if (query.employeeId) {
-      where.employeeId = query.employeeId;
+      where.employeeId = String(query.employeeId);
     }
 
+    // Validate and normalize status
     if (query.status) {
-      where.status = query.status;
+      // Accept either enum value or string
+      where.status = query.status as any;
     }
 
+    // Validate date range parameters
     if (query.startDate && query.endDate) {
+      const start = new Date(String(query.startDate));
+      const end = new Date(String(query.endDate));
+
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        throw new Error('Invalid startDate or endDate');
+      }
+
       where.OR = [
         {
           // Leave starts within the range
           startDate: {
-            gte: new Date(query.startDate),
-            lte: new Date(query.endDate),
+            gte: start,
+            lte: end,
           },
         },
         {
           // Leave ends within the range
           endDate: {
-            gte: new Date(query.startDate),
-            lte: new Date(query.endDate),
+            gte: start,
+            lte: end,
           },
         },
         {
@@ -267,12 +294,12 @@ class LeaveService {
           AND: [
             {
               startDate: {
-                lte: new Date(query.startDate),
+                lte: start,
               },
             },
             {
               endDate: {
-                gte: new Date(query.endDate),
+                gte: end,
               },
             },
           ],

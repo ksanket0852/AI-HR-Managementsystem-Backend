@@ -19,13 +19,17 @@ class JobService {
     location: string;
     type: 'FULL_TIME' | 'PART_TIME' | 'CONTRACT' | 'TEMPORARY' | 'INTERNSHIP';
     postedBy: string;
-    closingDate?: Date;
+    closingDate?: string | Date;
   }): Promise<Job> {
+    // Convert closingDate string to Date object if provided
+    const processedData = {
+      ...jobData,
+      status: 'OPEN' as const,
+      closingDate: jobData.closingDate ? new Date(jobData.closingDate) : undefined,
+    };
+
     return await prisma.job.create({
-      data: {
-        ...jobData,
-        status: 'OPEN',
-      },
+      data: processedData,
     });
   }
 

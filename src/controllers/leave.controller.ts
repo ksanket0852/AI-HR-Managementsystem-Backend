@@ -177,16 +177,19 @@ class LeaveController {
 
   public async getLeaveApplications(req: AuthenticatedRequest, res: Response): Promise<Response> {
     try {
+      // Clone query params so we don't mutate Express's req.query
+      const queryObj: any = { ...(req.query as Record<string, any>) };
+
       // If user is not HR or admin, filter by their employee ID
       if (req.user?.role !== 'HR_ADMIN' && req.user?.role !== 'HR_MANAGER' && req.user?.role !== 'SUPER_ADMIN') {
         const employeeId = await this.getEmployeeId(req.user?.id || '');
         if (!employeeId) {
           return res.status(404).json({ message: "Employee profile not found for this user" });
         }
-        req.query.employeeId = employeeId;
+        queryObj.employeeId = employeeId;
       }
-      
-      const leaves = await leaveService.getLeaveApplications(req.query);
+
+      const leaves = await leaveService.getLeaveApplications(queryObj);
       return res.status(200).json(leaves);
     } catch (error) {
       if (error instanceof Error) {

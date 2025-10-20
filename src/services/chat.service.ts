@@ -40,48 +40,62 @@ class ChatService {
    * Get a chat session by ID
    */
   async getChatSessionById(id: string): Promise<ChatSessionDto | null> {
-    const firstMessage = await this.prisma.chatMessage.findUnique({
-      where: { id },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true
+    try {
+      const firstMessage = await this.prisma.chatMessage.findUnique({
+        where: { id },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true
+            }
           }
         }
+      });
+
+      if (!firstMessage) {
+        console.log(`Chat session with ID ${id} not found`);
+        return null;
       }
-    });
 
-    if (!firstMessage) return null;
+      // Check if this is actually a session start message
+      if (!firstMessage.message.startsWith('Chat session started: ')) {
+        console.log(`Message with ID ${id} is not a session start message`);
+        return null;
+      }
 
-    const messages = await this.prisma.chatMessage.findMany({
-      where: {
+      const messages = await this.prisma.chatMessage.findMany({
+        where: {
+          userId: firstMessage.userId,
+          createdAt: {
+            gte: firstMessage.createdAt
+          }
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true
+            }
+          }
+        },
+        orderBy: {
+          createdAt: 'asc'
+        }
+      });
+
+      return {
+        id: firstMessage.id,
         userId: firstMessage.userId,
-        createdAt: {
-          gte: firstMessage.createdAt
-        }
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true
-          }
-        }
-      },
-      orderBy: {
-        createdAt: 'asc'
-      }
-    });
-
-    return {
-      id: firstMessage.id,
-      userId: firstMessage.userId,
-      title: firstMessage.message.replace('Chat session started: ', ''),
-      createdAt: firstMessage.createdAt,
-      updatedAt: messages[messages.length - 1].createdAt,
-      messages: messages.map(this.mapMessageToDto)
-    };
+        title: firstMessage.message.replace('Chat session started: ', ''),
+        createdAt: firstMessage.createdAt,
+        updatedAt: messages[messages.length - 1]?.createdAt || firstMessage.createdAt,
+        messages: messages.map(this.mapMessageToDto)
+      };
+    } catch (error) {
+      console.error(`Error fetching chat session ${id}:`, error);
+      return null;
+    }
   }
 
   /**

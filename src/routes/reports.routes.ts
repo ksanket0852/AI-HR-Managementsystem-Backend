@@ -21,7 +21,9 @@ router.get('/employees/attendance', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { employeeId, startDate, endDate, format: exportFormat } = req.query;
+  const { employeeId, startDate, endDate, format: exportFormat } = req.query;
+  // Debug: log incoming query params to help trace 500s
+  console.debug('[reports] /employees/attendance called with', { employeeId, startDate, endDate, format: exportFormat, user: req.user?.id });
     
     const whereClause: any = {};
     if (employeeId) {
@@ -34,10 +36,29 @@ router.get('/employees/attendance', [
       };
     }
 
-    if (req.user!.role === 'EMPLOYEE') {
+    // Safely read req.user without triggering getters that may throw
+    let userRole: string | null = null;
+    let userId: string | null = null;
+    try {
+      const hasUserProp = Object.prototype.hasOwnProperty.call(req, 'user');
+      console.debug('[reports] req.user exists?', hasUserProp, 'type:', typeof req.user);
+      if (hasUserProp && req.user) {
+        const u = req.user as any;
+        userRole = ('role' in u) ? u.role : null;
+        userId = ('id' in u) ? u.id : null;
+      }
+    } catch (e) {
+      console.error('Error safely reading req.user in attendance route:', e, { user: typeof req.user === 'object' ? req.user : req.user });
+      userRole = null;
+      userId = null;
+    }
+
+    if (userRole === 'EMPLOYEE' && userId) {
       // Find employee record for this user
+      const employeeWhere: any = {};
+      employeeWhere.userId = userId;
       const employee = await prisma.employee.findFirst({
-        where: { userId: req.user!.id }
+        where: employeeWhere
       });
       if (employee) {
         whereClause.employeeId = employee.id;
@@ -75,19 +96,61 @@ router.get('/employees/attendance', [
     const reportData = {
       title: 'Employee Attendance Report',
       statistics: stats,
-      records: attendanceRecords.map(record => ({
-        id: record.id,
-        employeeName: `${record.employee.firstName} ${record.employee.lastName}`,
-        department: record.employee.department.name,
-        date: record.date.toISOString().split('T')[0],
-        clockIn: record.clockIn ? record.clockIn.toISOString().split('T')[1].substring(0, 5) : null,
-        clockOut: record.clockOut ? record.clockOut.toISOString().split('T')[1].substring(0, 5) : null,
-        status: record.status,
-        totalHours: record.clockIn && record.clockOut ? 
-          (new Date(record.clockOut).getTime() - new Date(record.clockIn).getTime()) / (1000 * 60 * 60) : 0,
-        overtimeHours: 0, // Default to 0 since field doesn't exist
-        isLate: false // Default to false since field doesn't exist
-      }))
+      records: attendanceRecords.map(record => {
+        // Defensive access - some relations may be null in inconsistent DB states
+        const emp = (record as any).employee || {};
+        const dept = emp.department || {};
+
+        const employeeName = emp.firstName || emp.id || 'Unknown';
+        const departmentName = dept.name || 'Unknown';
+
+        // Safely format dates even if they're strings
+        const formatDate = (d: any) => {
+          if (!d) return null;
+          try {
+            const dateObj = d instanceof Date ? d : new Date(d);
+            if (isNaN(dateObj.getTime())) return String(d);
+            return dateObj.toISOString().split('T')[0];
+          } catch (e) {
+            return String(d);
+          }
+        };
+
+        const formatTime = (d: any) => {
+          if (!d) return null;
+          try {
+            const dateObj = d instanceof Date ? d : new Date(d);
+            if (isNaN(dateObj.getTime())) return String(d);
+            return dateObj.toISOString().split('T')[1].substring(0, 5);
+          } catch (e) {
+            return String(d);
+          }
+        };
+
+        let totalHoursVal = 0;
+        try {
+          if (record.clockIn && record.clockOut) {
+            totalHoursVal = (new Date(record.clockOut).getTime() - new Date(record.clockIn).getTime()) / (1000 * 60 * 60);
+          } else if (record.totalHours) {
+            totalHoursVal = Number(record.totalHours) || 0;
+          }
+        } catch (e) {
+          totalHoursVal = 0;
+        }
+
+        return {
+          id: record.id,
+          employeeName,
+          department: departmentName,
+          date: formatDate(record.date),
+          clockIn: formatTime(record.clockIn),
+          clockOut: formatTime(record.clockOut),
+          status: record.status,
+          totalHours: totalHoursVal,
+          overtimeHours: record.overtime ? Number(record.overtime) : 0,
+          isLate: false
+        };
+      })
     };
 
     if (exportFormat === 'excel') {
@@ -127,10 +190,25 @@ router.get('/employees/leave', [
       whereClause.endDate = { lte: new Date(endDate as string) };
     }
 
-    if (req.user!.role === 'EMPLOYEE') {
+    let userRole: string | null = null;
+    let userId: string | null = null;
+    try {
+      if (req.user) {
+        const u = req.user as any;
+        userRole = u?.role ?? null;
+        userId = u?.id ?? null;
+      }
+    } catch (e) {
+      console.error('Unexpected error reading req.user in leave report:', { err: e, user: req.user });
+      userRole = null;
+      userId = null;
+    }
+    if (userRole === 'EMPLOYEE' && userId) {
       // Find employee record for this user
+      const employeeWhere: any = {};
+      employeeWhere.userId = userId;
       const employee = await prisma.employee.findFirst({
-        where: { userId: req.user!.id }
+        where: employeeWhere
       });
       if (employee) {
         whereClause.employeeId = employee.id;
@@ -174,18 +252,33 @@ router.get('/employees/leave', [
     const reportData = {
       title: 'Employee Leave Report',
       statistics: stats,
-      records: leaveRecords.map(leave => ({
-        id: leave.id,
-        employeeName: `${leave.employee.firstName} ${leave.employee.lastName}`,
-        department: leave.employee.department.name,
-        leaveType: leave.leaveType.name,
-        startDate: leave.startDate.toISOString().split('T')[0],
-        endDate: leave.endDate.toISOString().split('T')[0],
-        totalDays: Math.ceil((leave.endDate.getTime() - leave.startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1,
-        status: leave.status,
-        reason: leave.reason,
-        appliedDate: leave.createdAt.toISOString().split('T')[0]
-      }))
+      records: leaveRecords.map(leave => {
+        const emp = (leave as any).employee || {};
+        const dept = emp.department || {};
+        const leaveType = (leave as any).leaveType || {};
+
+        const employeeName = emp.firstName && emp.lastName ? `${emp.firstName} ${emp.lastName}` : emp.id || 'Unknown';
+        const departmentName = dept.name || 'Unknown';
+        const leaveTypeName = leaveType.name || 'Unknown';
+
+        const safeDate = (d: any) => {
+          if (!d) return null;
+          try { const dt = d instanceof Date ? d : new Date(d); return isNaN(dt.getTime()) ? String(d) : dt.toISOString().split('T')[0]; } catch { return String(d); }
+        };
+
+        return {
+          id: leave.id,
+          employeeName,
+          department: departmentName,
+          leaveType: leaveTypeName,
+          startDate: safeDate(leave.startDate),
+          endDate: safeDate(leave.endDate),
+          totalDays: Math.ceil((new Date(leave.endDate).getTime() - new Date(leave.startDate).getTime()) / (1000 * 60 * 60 * 24)) + 1,
+          status: leave.status,
+          reason: leave.reason,
+          appliedDate: safeDate(leave.createdAt)
+        };
+      })
     };
 
     if (exportFormat === 'excel') {
@@ -322,10 +415,25 @@ router.get('/payroll', [
       whereClause.employeeId = employeeId;
     }
 
-    if (req.user!.role === 'EMPLOYEE') {
+    let userRole: string | null = null;
+    let userId: string | null = null;
+    try {
+      if (req.user) {
+        const u = req.user as any;
+        userRole = u?.role ?? null;
+        userId = u?.id ?? null;
+      }
+    } catch (e) {
+      console.error('Unexpected error reading req.user in payroll report:', { err: e, user: req.user });
+      userRole = null;
+      userId = null;
+    }
+    if (userRole === 'EMPLOYEE' && userId) {
       // Find employee record for this user
+      const employeeWhere: any = {};
+      employeeWhere.userId = userId;
       const employee = await prisma.employee.findFirst({
-        where: { userId: req.user!.id }
+        where: employeeWhere
       });
       if (employee) {
         whereClause.employeeId = employee.id;
@@ -349,11 +457,12 @@ router.get('/payroll', [
       const tax = grossSalary * 0.15; // 15% tax
       const totalDeductions = deductions + tax;
       const netSalary = grossSalary - totalDeductions;
+      const deptName = (emp as any).department ? ((emp as any).department.name || 'Unknown') : 'Unknown';
 
       return {
         id: emp.id,
         employeeName: `${emp.firstName} ${emp.lastName}`,
-        department: emp.department.name,
+        department: deptName,
         basicSalary,
         allowances,
         grossSalary,
@@ -404,7 +513,7 @@ router.post('/custom', async (req: AuthenticatedRequest, res: Response) => {
     reportData.type = reportType;
     reportData.columns = columns;
     reportData.generatedAt = new Date().toISOString();
-    reportData.generatedBy = req.user!.email; // Use email instead of name
+  reportData.generatedBy = req.user?.email || 'system'; // Use email when available
 
     switch (reportType) {
       case 'attendance':
@@ -459,15 +568,17 @@ async function buildCustomAttendanceReport(filters: any, columns: string[], date
     }
   });
 
-  return records.map(record => {
+    return records.map(record => {
     const data: any = {};
+    const emp = (record as any).employee || {};
+    const dept = emp.department || {};
     columns.forEach(column => {
       switch (column) {
         case 'employeeName':
-          data[column] = `${record.employee.firstName} ${record.employee.lastName}`;
+          data[column] = emp.firstName && emp.lastName ? `${emp.firstName} ${emp.lastName}` : emp.id || '';
           break;
         case 'department':
-          data[column] = record.employee.department.name;
+          data[column] = dept.name || '';
           break;
         case 'date':
           data[column] = record.date.toISOString().split('T')[0];
@@ -521,15 +632,17 @@ async function buildCustomLeaveReport(filters: any, columns: string[], dateRange
     }
   });
 
-  return records.map(record => {
+    return records.map(record => {
     const data: any = {};
+    const emp = (record as any).employee || {};
+    const dept = emp.department || {};
     columns.forEach(column => {
       switch (column) {
         case 'employeeName':
-          data[column] = `${record.employee.firstName} ${record.employee.lastName}`;
+          data[column] = emp.firstName && emp.lastName ? `${emp.firstName} ${emp.lastName}` : emp.id || '';
           break;
         case 'department':
-          data[column] = record.employee.department.name;
+          data[column] = dept.name || '';
           break;
         case 'leaveType':
           data[column] = record.leaveType.name;

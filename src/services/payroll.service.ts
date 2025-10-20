@@ -469,7 +469,17 @@ class PayrollService {
     });
 
     if (payrolls.length === 0) {
-      throw new Error(`No payrolls found for ${month}/${year}`);
+      // Return an empty/zeroed report instead of throwing an error so the
+      // frontend can treat "no data" as an empty result rather than a Bad Request.
+      return {
+        totalEmployees: 0,
+        totalPayroll: 0,
+        averageSalary: 0,
+        totalTax: 0,
+        totalAllowances: 0,
+        totalDeductions: 0,
+        payrollByDepartment: []
+      };
     }
 
     // Calculate totals

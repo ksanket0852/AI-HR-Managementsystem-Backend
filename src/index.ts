@@ -23,24 +23,33 @@ import leaveRoutes from "./routes/leave.routes";
 import payrollRoutes from "./routes/payroll.routes";
 import performanceRoutes from "./routes/performance.routes";
 import chatRoutes from "./routes/chat.routes";
+import healthRoutes from "./routes/health.routes";
+import testRoutes from "./routes/test.routes";
 import resumeParserRoutes from "./routes/resumeParser.routes";
 import analyticsRoutes from "./routes/analytics.routes";
 import notificationRoutes from "./routes/notification.routes";
 import reportsRoutes from "./routes/reports.routes";
+import jobRoutes from "./routes/job.routes";
 
 const app = express();
 const server = createServer(app);
 
 // Create Socket.io server with error handling
+const allowedOrigins = [
+  process.env.FRONTEND_URL || "http://localhost:3000",
+  "http://localhost:5173", // Vite dev server
+];
+
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
-    credentials: true
+    credentials: true,
   },
   pingTimeout: 60000,
-  pingInterval: 25000
+  pingInterval: 25000,
 });
+
 
 // Initialize socket service
 const socketService = new SocketService(io);
@@ -52,9 +61,10 @@ io.on("error", (error) => {
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:3000",
-  credentials: true
+  origin: allowedOrigins,
+  credentials: true,
 }));
+
 app.use(helmet());
 app.use(compression());
 app.use(express.json());
@@ -65,10 +75,6 @@ app.use(rateLimiter);
 // Static files
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
-// Health check endpoint
-app.get("/api/health", (req, res) => {
-  res.status(200).json({ status: "ok", timestamp: new Date() });
-});
 
 // Make socket service available to routes
 app.locals.socketService = socketService;
@@ -85,10 +91,13 @@ app.use("/api/leaves", leaveRoutes);
 app.use("/api/payroll", payrollRoutes);
 app.use("/api/performance", performanceRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/health", healthRoutes);
+app.use("/api/test", testRoutes);
 app.use("/api/resume-parser", resumeParserRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/reports", reportsRoutes);
+app.use("/api/jobs", jobRoutes);
 
 // Error handling
 app.use(notFound);

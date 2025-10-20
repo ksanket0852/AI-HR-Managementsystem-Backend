@@ -184,6 +184,40 @@ class ResumeParserController {
   }
 
   /**
+   * Update candidate general information
+   */
+  async updateCandidate(req: Request, res: Response): Promise<void> {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        res.status(400).json({
+          success: false,
+          message: 'Validation errors',
+          errors: errors.array(),
+        });
+        return;
+      }
+
+      const { candidateId } = req.params;
+      const updateData = req.body;
+
+      const candidate = await resumeParserService.updateCandidate(candidateId, updateData);
+
+      res.status(200).json({
+        success: true,
+        message: 'Candidate updated successfully',
+        data: candidate,
+      });
+    } catch (error) {
+      console.error('Update candidate error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to update candidate',
+      });
+    }
+  }
+
+  /**
    * Match resume with job
    */
   async matchResumeWithJob(req: Request, res: Response): Promise<void> {

@@ -25,32 +25,50 @@ export class SocketService {
     this.io.use(async (socket: AuthenticatedSocket, next) => {
       try {
         const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.replace('Bearer ', '');
-        
+
         if (!token) {
           return next(new Error('Authentication error: No token provided'));
         }
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
-        
-        // Fetch user details from database
-        const user = await this.prisma.user.findUnique({
-          where: { id: decoded.userId },
-          include: {
-            employee: {
-              include: {
-                department: true
+
+        // Support tokens that use either `id` or `userId` in the payload (and fallback to email)
+        const userId = decoded.id || decoded.userId;
+        const email = decoded.email;
+
+        // Fetch user details from database using the available identifier
+        let user = null as any;
+        if (userId) {
+          user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            include: {
+              employee: {
+                include: {
+                  department: true
+                }
               }
             }
-          }
-        });
+          });
+        } else if (email) {
+          user = await this.prisma.user.findUnique({
+            where: { email },
+            include: {
+              employee: {
+                include: {
+                  department: true
+                }
+              }
+            }
+          });
+        }
 
-        if (!user || !user.employee) {
+        if (!user) {
           return next(new Error('Authentication error: User not found'));
         }
 
         socket.userId = user.id;
         socket.userRole = user.role;
-        
+
         next();
       } catch (error) {
         next(new Error('Authentication error: Invalid token'));
