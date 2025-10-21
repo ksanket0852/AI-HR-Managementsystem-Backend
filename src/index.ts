@@ -37,7 +37,8 @@ const server = createServer(app);
 // Create Socket.io server with error handling
 const allowedOrigins = [
   process.env.FRONTEND_URL || "http://localhost:3000",
-  "http://localhost:5173", "https://ai-hr-managementsystem-frontend-fyy.vercel.app/api"// Vite dev server
+  "http://localhost:5173", "https://ai-hr-managementsystem-frontend-fyy.vercel.app",
+  "https://vercel.com/ksanket0852s-projects/ai-hr-managementsystem-frontend-fyyh/CUMaZGZknrt637PaB57Z9M88bdgz"// Vite dev server
 ];
 
 const io = new Server(server, {
