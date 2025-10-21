@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node src/index.js",
     "dev": "nodemon src/index.ts",
     "dev:watch": "concurrently \"tsc -w\" \"nodemon dist/index.js\"",
     "prisma:generate": "prisma generate",
